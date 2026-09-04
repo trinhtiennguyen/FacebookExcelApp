@@ -27,13 +27,13 @@ android {
     }
 }
 
-    buildFeatures {
-        compose = true
-    }
+buildFeatures {
+	compose = true
+}
 
-    packaging {
-        resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
-    }
+packaging {
+	resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
+}
 
 
 dependencies {
