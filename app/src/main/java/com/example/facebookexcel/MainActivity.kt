@@ -745,7 +745,7 @@ private fun FacebookLoginDialog(
 
                                 displayZoomControls = false
 
-                                supportZoom = false
+                                setSupportZoom(false)
 
                                 mediaPlaybackRequiresUserGesture =
                                     false
