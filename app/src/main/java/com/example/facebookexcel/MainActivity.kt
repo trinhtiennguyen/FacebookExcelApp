@@ -43,6 +43,7 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import kotlinx.coroutines.delay
+import androidx.compose.ui.viewinterop.AndroidView
 
 private val ColLink = 330.dp
 private val ColTitle = 300.dp
