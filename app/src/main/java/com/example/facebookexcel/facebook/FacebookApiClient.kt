@@ -4,22 +4,22 @@ import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import android.webkit.CookieManager
+import android.webkit.WebChromeClient
+import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
-import org.json.JSONTokener
 import java.net.URLEncoder
 import kotlin.coroutines.resume
 
-/**
- * Kết quả dữ liệu Facebook Reel.
- */
+
 data class FacebookResult(
     val title: String,
     val time: String,
@@ -37,22 +37,15 @@ class FacebookApiClient {
             .build()
 
 
-    /**
-     * LOAD Facebook Reel/share link.
-     *
-     * Thứ tự:
-     *
-     * 1. Direct HTTP
-     * 2. WebView với phiên Facebook Login
-     * 3. Graph API nếu có Access Token
-     */
     suspend fun load(
         context: Context,
         url: String,
         accessToken: String
     ): Result<FacebookResult> {
 
-        val cleanUrl = url.trim()
+        val cleanUrl =
+            url.trim()
+
 
         if (!isFacebookUrl(cleanUrl)) {
 
@@ -63,84 +56,95 @@ class FacebookApiClient {
             )
         }
 
-        /*
-         * =========================================================
-         * 1. DIRECT HTTP
-         * =========================================================
-         */
+
+        // ============================================================
+        // 1. DIRECT HTTP
+        // ============================================================
+
         val direct =
             withContext(Dispatchers.IO) {
+
                 loadDirect(cleanUrl)
             }
+
 
         if (
             direct.isSuccess &&
             direct.getOrNull()?.hasUsefulData() == true
         ) {
+
             return direct
         }
 
-        /*
-         * =========================================================
-         * 2. FACEBOOK LOGIN WEBVIEW
-         * =========================================================
-         *
-         * CookieManager là global WebView CookieManager.
-         *
-         * Vì MainActivity cũng sử dụng CookieManager này cho
-         * màn hình Facebook Login nên phiên đăng nhập được dùng lại.
-         */
+
+        // ============================================================
+        // 2. WEBVIEW + FACEBOOK LOGIN COOKIE
+        // ============================================================
+
         val web =
             try {
+
                 loadWithWebView(
                     context,
                     cleanUrl
                 )
+
             } catch (e: Exception) {
 
-                Result.failure<FacebookResult>(
-                    e
+                Result.failure(
+                    FacebookResultException(
+                        e.message
+                            ?: "Lỗi WebView"
+                    )
                 )
             }
+
 
         if (
             web.isSuccess &&
             web.getOrNull()?.hasUsefulData() == true
         ) {
+
             return web
         }
 
-        /*
-         * =========================================================
-         * 3. GRAPH API
-         * =========================================================
-         *
-         * Chỉ chạy nếu người dùng có nhập Access Token.
-         */
-        if (accessToken.isNotBlank()) {
+
+        // ============================================================
+        // 3. GRAPH API
+        // ============================================================
+
+        if (
+            accessToken.isNotBlank()
+        ) {
 
             val graph =
                 withContext(Dispatchers.IO) {
+
                     loadGraph(
                         cleanUrl,
                         accessToken.trim()
                     )
                 }
 
+
             if (
                 graph.isSuccess &&
                 graph.getOrNull()?.hasUsefulData() == true
             ) {
+
                 return graph
             }
 
+
             val graphError =
-                graph
-                    .exceptionOrNull()
+                graph.exceptionOrNull()
                     ?.message
                     .orEmpty()
 
-            if (graphError.isNotBlank()) {
+
+            if (
+                graphError.isNotBlank()
+            ) {
 
                 return Result.failure(
                     IllegalStateException(
@@ -150,30 +154,21 @@ class FacebookApiClient {
             }
         }
 
-        /*
-         * =========================================================
-         * ERROR
-         * =========================================================
-         */
+
         val webError =
-            web
-                .exceptionOrNull()
+            web.exceptionOrNull()
                 ?.message
                 .orEmpty()
 
+
         val directError =
-            direct
-                .exceptionOrNull()
+            direct.exceptionOrNull()
                 ?.message
                 .orEmpty()
+
 
         val message =
             when {
-
-                webError.contains(
-                    "đăng nhập",
-                    true
-                ) -> webError
 
                 webError.isNotBlank() ->
                     webError
@@ -182,11 +177,9 @@ class FacebookApiClient {
                     directError
 
                 else ->
-                    "Không lấy được dữ liệu Reel. " +
-                    "Nếu Reel yêu cầu đăng nhập, " +
-                    "vào Cài đặt → Facebook Login → " +
-                    "Đăng nhập Facebook rồi LOAD lại."
+                    "Không lấy được dữ liệu Reel."
             }
+
 
         return Result.failure(
             IllegalStateException(message)
@@ -194,41 +187,35 @@ class FacebookApiClient {
     }
 
 
-    /**
-     * Kiểm tra URL Facebook.
-     */
     private fun isFacebookUrl(
         url: String
     ): Boolean {
 
         return url.contains(
             "facebook.com",
-            true
+            ignoreCase = true
         ) ||
         url.contains(
             "fb.watch",
-            true
+            ignoreCase = true
         )
     }
 
 
-    /**
-     * Kiểm tra kết quả có dữ liệu hữu ích hay không.
-     */
-    private fun FacebookResult.hasUsefulData(): Boolean {
+    private fun FacebookResult.hasUsefulData():
+            Boolean {
 
         return title.isNotBlank() ||
-            time.isNotBlank() ||
-            image.isNotBlank() ||
-            resolvedUrl.isNotBlank()
+                time.isNotBlank() ||
+                image.isNotBlank() ||
+                resolvedUrl.isNotBlank()
     }
 
 
-    /**
-     * =============================================================
-     * DIRECT HTTP
-     * =============================================================
-     */
+    // ================================================================
+    // DIRECT HTTP
+    // ================================================================
+
     private fun loadDirect(
         url: String
     ): Result<FacebookResult> {
@@ -248,6 +235,7 @@ class FacebookApiClient {
                     )
                     .build()
 
+
             client
                 .newCall(request)
                 .execute()
@@ -258,6 +246,7 @@ class FacebookApiClient {
                             ?.string()
                             .orEmpty()
 
+
                     if (!response.isSuccessful) {
 
                         return Result.failure(
@@ -267,10 +256,13 @@ class FacebookApiClient {
                         )
                     }
 
+
                     Result.success(
                         parseHtml(
                             body,
-                            response.request.url.toString()
+                            response.request
+                                .url
+                                .toString()
                         )
                     )
                 }
@@ -282,11 +274,10 @@ class FacebookApiClient {
     }
 
 
-    /**
-     * =============================================================
-     * GRAPH API
-     * =============================================================
-     */
+    // ================================================================
+    // GRAPH API
+    // ================================================================
+
     private fun loadGraph(
         url: String,
         accessToken: String
@@ -300,22 +291,23 @@ class FacebookApiClient {
                     "UTF-8"
                 )
 
-            val encodedToken =
-                URLEncoder.encode(
-                    accessToken,
-                    "UTF-8"
-                )
 
             val fields =
                 "message,story,created_time," +
                 "full_picture,permalink_url," +
                 "name,description"
 
+
             val endpoint =
                 "https://graph.facebook.com/v23.0/" +
                 "?id=$encodedUrl" +
                 "&fields=$fields" +
-                "&access_token=$encodedToken"
+                "&access_token=" +
+                URLEncoder.encode(
+                    accessToken,
+                    "UTF-8"
+                )
+
 
             val request =
                 Request.Builder()
@@ -327,6 +319,7 @@ class FacebookApiClient {
                     .get()
                     .build()
 
+
             client
                 .newCall(request)
                 .execute()
@@ -337,21 +330,26 @@ class FacebookApiClient {
                             ?.string()
                             .orEmpty()
 
+
                     if (!response.isSuccessful) {
 
                         return Result.failure(
                             IllegalStateException(
                                 "Facebook Graph API HTTP " +
-                                "${response.code}: $body"
+                                    "${response.code}: $body"
                             )
                         )
                     }
 
+
                     val root =
                         JSONObject(body)
 
+
                     val data =
-                        if (root.has("data")) {
+                        if (
+                            root.has("data")
+                        ) {
 
                             root.optJSONObject(
                                 "data"
@@ -362,7 +360,9 @@ class FacebookApiClient {
                             root
                         }
 
+
                     Result.success(
+
                         FacebookResult(
 
                             title =
@@ -409,13 +409,10 @@ class FacebookApiClient {
     }
 
 
-    /**
-     * =============================================================
-     * WEBVIEW
-     * =============================================================
-     *
-     * Dùng cùng CookieManager với màn hình Facebook Login.
-     */
+    // ================================================================
+    // WEBVIEW
+    // ================================================================
+
     private suspend fun loadWithWebView(
         context: Context,
         url: String
@@ -428,11 +425,12 @@ class FacebookApiClient {
             ).post {
 
                 val webView =
-                    WebView(
-                        context.applicationContext
-                    )
+                    WebView(context)
 
-                var finished = false
+
+                var finished =
+                    false
+
 
                 fun finish(
                     result: Result<FacebookResult>
@@ -442,37 +440,92 @@ class FacebookApiClient {
                         return
                     }
 
+
                     finished = true
+
 
                     try {
                         webView.stopLoading()
+                    } catch (_: Exception) {
+                    }
+
+
+                    try {
                         webView.destroy()
                     } catch (_: Exception) {
                     }
 
-                    if (continuation.isActive) {
-                        continuation.resume(result)
+
+                    if (
+                        continuation.isActive
+                    ) {
+
+                        continuation.resume(
+                            result
+                        )
                     }
                 }
 
 
-                /*
-                 * Cookie dùng chung với Facebook Login.
-                 */
-                CookieManager
-                    .getInstance()
+                // ======================================================
+                // SETTINGS
+                // ======================================================
+
+                webView.settings.apply {
+
+                    javaScriptEnabled =
+                        true
+
+                    domStorageEnabled =
+                        true
+
+                    databaseEnabled =
+                        true
+
+                    javaScriptCanOpenWindowsAutomatically =
+                        true
+
+                    loadsImagesAutomatically =
+                        true
+
+                    allowFileAccess =
+                        true
+
+                    allowContentAccess =
+                        true
+
+                    setSupportMultipleWindows(
+                        true
+                    )
+
+                    userAgentString =
+                        MOBILE_UA
+                }
+
+
+                // ======================================================
+                // COOKIE
+                // ======================================================
+
+                val cookieManager =
+                    CookieManager
+                        .getInstance()
+
+
+                cookieManager
                     .setAcceptCookie(true)
 
 
-                webView.settings.javaScriptEnabled =
-                    true
+                cookieManager
+                    .setAcceptThirdPartyCookies(
+                        webView,
+                        true
+                    )
 
-                webView.settings.domStorageEnabled =
-                    true
 
-                webView.settings.userAgentString =
-                    MOBILE_UA
-
+                // ======================================================
+                // WEBVIEW CLIENT
+                // ======================================================
 
                 webView.webViewClient =
                     object : WebViewClient() {
@@ -495,238 +548,202 @@ class FacebookApiClient {
                                 return
                             }
 
+
                             Handler(
                                 Looper.getMainLooper()
-                            ).postDelayed({
+                            ).postDelayed(
 
-                                if (
-                                    finished ||
-                                    view == null
-                                ) {
-                                    return@postDelayed
-                                }
+                                {
 
-
-                                /*
-                                 * JavaScript lấy metadata từ trang Facebook.
-                                 */
-                                val script = """
-                                    (function() {
-
-                                      function meta(name) {
-
-                                        var a =
-                                          document.querySelector(
-                                            'meta[property="' +
-                                            name +
-                                            '"]'
-                                          );
-
-                                        if (!a) {
-
-                                          a =
-                                            document.querySelector(
-                                              'meta[name="' +
-                                              name +
-                                              '"]'
-                                            );
-                                        }
-
-                                        return a
-                                          ? (a.content || '')
-                                          : '';
-                                      }
+                                    if (
+                                        finished ||
+                                        view == null
+                                    ) {
+                                        return@postDelayed
+                                    }
 
 
-                                      var title =
-                                        meta('og:title') ||
-                                        meta('twitter:title') ||
-                                        document.title ||
-                                        '';
+                                    val script = """
+                                        (function() {
+                                            function meta(name) {
+                                                var a =
+                                                    document.querySelector(
+                                                        'meta[property="' +
+                                                        name +
+                                                        '"]'
+                                                    );
+
+                                                if (!a) {
+                                                    a =
+                                                        document.querySelector(
+                                                            'meta[name="' +
+                                                            name +
+                                                            '"]'
+                                                        );
+                                                }
+
+                                                return a
+                                                    ? (a.content || '')
+                                                    : '';
+                                            }
+
+                                            var title =
+                                                meta('og:title') ||
+                                                meta('twitter:title') ||
+                                                document.title ||
+                                                '';
+
+                                            var image =
+                                                meta('og:image') ||
+                                                meta('twitter:image') ||
+                                                '';
+
+                                            var time =
+                                                meta('article:published_time') ||
+                                                meta('video:release_date') ||
+                                                meta('og:updated_time') ||
+                                                '';
+
+                                            if (!time) {
+                                                var t =
+                                                    document.querySelector(
+                                                        'time[datetime]'
+                                                    );
+
+                                                if (t) {
+                                                    time =
+                                                        t.getAttribute(
+                                                            'datetime'
+                                                        ) || '';
+                                                }
+                                            }
+
+                                            var canonical =
+                                                document.querySelector(
+                                                    'link[rel="canonical"]'
+                                                );
+
+                                            var canonicalUrl =
+                                                canonical
+                                                    ? canonical.href
+                                                    : location.href;
+
+                                            var body =
+                                                document.body
+                                                    ? document.body.innerText
+                                                    : '';
+
+                                            return JSON.stringify({
+                                                title: title,
+                                                image: image,
+                                                time: time,
+                                                url: canonicalUrl,
+                                                body: body.substring(0, 5000)
+                                            });
+                                        })();
+                                    """.trimIndent()
 
 
-                                      var image =
-                                        meta('og:image') ||
-                                        meta('twitter:image') ||
-                                        '';
+                                    view.evaluateJavascript(
+                                        script
+                                    ) { raw ->
+
+                                        try {
+
+                                            val decoded =
+                                                org.json.JSONTokener(
+                                                    raw
+                                                )
+                                                    .nextValue()
+                                                    ?.toString()
+                                                    ?: raw
 
 
-                                      var time =
-                                        meta('article:published_time') ||
-                                        meta('video:release_date') ||
-                                        meta('og:updated_time') ||
-                                        '';
+                                            val obj =
+                                                JSONObject(
+                                                    decoded
+                                                )
 
 
-                                      if (!time) {
-
-                                        var t =
-                                          document.querySelector(
-                                            'time[datetime]'
-                                          );
-
-                                        if (t) {
-
-                                          time =
-                                            t.getAttribute(
-                                              'datetime'
-                                            ) || '';
-                                        }
-                                      }
+                                            val body =
+                                                obj.optString(
+                                                    "body"
+                                                )
 
 
-                                      var canonical =
-                                        document.querySelector(
-                                          'link[rel="canonical"]'
-                                        );
+                                            if (
+                                                isLoginPage(
+                                                    body,
+                                                    loadedUrl.orEmpty()
+                                                )
+                                            ) {
 
+                                                finish(
+                                                    Result.failure(
+                                                        IllegalStateException(
+                                                            "Facebook yêu cầu đăng nhập. " +
+                                                            "Vào Cài đặt → Facebook Login."
+                                                        )
+                                                    )
+                                                )
 
-                                      var canonicalUrl =
-                                        canonical
-                                          ? canonical.href
-                                          : (
-                                              location.href || ''
-                                            );
+                                                return@evaluateJavascript
+                                            }
 
-
-                                      var bodyText =
-                                        (
-                                          document.body
-                                            ? document.body.innerText
-                                            : ''
-                                        ).slice(
-                                          0,
-                                          4000
-                                        );
-
-
-                                      return JSON.stringify({
-
-                                        title: title,
-                                        image: image,
-                                        time: time,
-                                        url: canonicalUrl,
-                                        body: bodyText
-
-                                      });
-
-                                    })();
-                                """.trimIndent()
-
-
-                                view.evaluateJavascript(
-                                    script
-                                ) { raw ->
-
-                                    try {
-
-                                        /*
-                                         * evaluateJavascript trả về
-                                         * JSON string literal.
-                                         */
-                                        val jsonText =
-                                            JSONTokener(
-                                                raw
-                                            )
-                                                .nextValue()
-                                                ?.toString()
-                                                ?: raw
-
-                                        val obj =
-                                            JSONObject(
-                                                jsonText
-                                            )
-
-                                        val body =
-                                            obj.optString(
-                                                "body"
-                                            )
-
-                                        val finalUrl =
-                                            loadedUrl
-                                                .orEmpty()
-
-
-                                        /*
-                                         * Nếu Facebook chuyển sang
-                                         * trang Login thì báo rõ.
-                                         */
-                                        if (
-                                            isLoginPage(
-                                                body,
-                                                finalUrl
-                                            )
-                                        ) {
 
                                             finish(
-                                                Result.failure(
-                                                    IllegalStateException(
-                                                        "Facebook yêu cầu đăng nhập. " +
-                                                        "Vào Cài đặt → Facebook Login → " +
-                                                        "Đăng nhập Facebook rồi thử LOAD lại."
+
+                                                Result.success(
+
+                                                    FacebookResult(
+
+                                                        title =
+                                                            obj.optString(
+                                                                "title"
+                                                            ).trim(),
+
+                                                        time =
+                                                            obj.optString(
+                                                                "time"
+                                                            ).trim(),
+
+                                                        image =
+                                                            obj.optString(
+                                                                "image"
+                                                            ).trim(),
+
+                                                        resolvedUrl =
+                                                            obj.optString(
+                                                                "url"
+                                                            )
+                                                                .trim()
+                                                                .ifBlank {
+                                                                    loadedUrl
+                                                                        .orEmpty()
+                                                                }
                                                     )
                                                 )
                                             )
 
-                                            return@evaluateJavascript
+                                        } catch (e: Exception) {
+
+                                            finish(
+                                                Result.failure(e)
+                                            )
                                         }
-
-
-                                        val result =
-                                            FacebookResult(
-
-                                                title =
-                                                    decodeHtml(
-                                                        obj.optString(
-                                                            "title"
-                                                        ).trim()
-                                                    ),
-
-                                                time =
-                                                    obj.optString(
-                                                        "time"
-                                                    ).trim(),
-
-                                                image =
-                                                    decodeHtml(
-                                                        obj.optString(
-                                                            "image"
-                                                        ).trim()
-                                                    ),
-
-                                                resolvedUrl =
-                                                    obj.optString(
-                                                        "url"
-                                                    )
-                                                        .trim()
-                                                        .ifBlank {
-                                                            finalUrl
-                                                        }
-                                            )
-
-
-                                        finish(
-                                            Result.success(
-                                                result
-                                            )
-                                        )
-
-                                    } catch (e: Exception) {
-
-                                        finish(
-                                            Result.failure(e)
-                                        )
                                     }
-                                }
 
-                            }, 1200L)
+                                },
+
+                                1500L
+                            )
                         }
 
 
                         override fun onReceivedError(
                             view: WebView?,
                             request: WebResourceRequest?,
-                            error: android.webkit.WebResourceError?
+                            error: WebResourceError?
                         ) {
 
                             if (
@@ -736,13 +753,12 @@ class FacebookApiClient {
                                 finish(
                                     Result.failure(
                                         IllegalStateException(
-                                            "Không mở được trang Facebook: " +
-                                            (
-                                                error
-                                                    ?.description
-                                                    ?.toString()
-                                                    ?: "unknown error"
-                                            )
+                                            "Không mở được Facebook: " +
+                                                (
+                                                    error?.description
+                                                        ?.toString()
+                                                        ?: "unknown"
+                                                )
                                         )
                                     )
                                 )
@@ -751,22 +767,22 @@ class FacebookApiClient {
                     }
 
 
-                /*
-                 * Quan trọng:
-                 *
-                 * Không tạo CookieManager mới.
-                 * Dùng CookieManager toàn cục của Android.
-                 *
-                 * Vì màn hình Login cũng dùng CookieManager này,
-                 * cookie đăng nhập sẽ được dùng lại ở đây.
-                 */
-                CookieManager
-                    .getInstance()
-                    .setAcceptCookie(true)
+                webView.webChromeClient =
+                    WebChromeClient()
 
+
+                // ======================================================
+                // LOAD
+                // ======================================================
+
+                cookieManager.flush()
 
                 webView.loadUrl(url)
 
+
+                // ======================================================
+                // CANCEL
+                // ======================================================
 
                 continuation.invokeOnCancellation {
 
@@ -790,9 +806,10 @@ class FacebookApiClient {
         }
 
 
-    /**
-     * Kiểm tra Facebook có đưa tới trang Login hay không.
-     */
+    // ================================================================
+    // LOGIN PAGE DETECTION
+    // ================================================================
+
     private fun isLoginPage(
         body: String,
         url: String
@@ -804,42 +821,31 @@ class FacebookApiClient {
         val b =
             body.lowercase()
 
+
         return u.contains("/login") ||
-            u.contains("login.php") ||
-            b.contains(
-                "log in to facebook"
-            ) ||
-            b.contains(
-                "log into facebook"
-            ) ||
-            b.contains(
-                "đăng nhập facebook"
-            ) ||
-            b.contains(
-                "create new account"
-            ) ||
-            b.contains(
-                "forgot password"
-            )
+
+                b.contains(
+                    "log in to facebook"
+                ) ||
+
+                b.contains(
+                    "log into facebook"
+                ) ||
+
+                b.contains(
+                    "đăng nhập facebook"
+                ) ||
+
+                b.contains(
+                    "create new account"
+                )
     }
 
 
-    /**
-     * =============================================================
-     * HTML PARSER
-     * =============================================================
-     *
-     * Đã sửa lỗi:
-     *
-     * RegexOption.IGNORE_CASE or RegexOption.DOT_MATCHES_ALL
-     *
-     * thành:
-     *
-     * setOf(
-     *     RegexOption.IGNORE_CASE,
-     *     RegexOption.DOT_MATCHES_ALL
-     * )
-     */
+    // ================================================================
+    // HTML PARSER
+    // ================================================================
+
     private fun parseHtml(
         html: String,
         resolvedUrl: String
@@ -849,36 +855,33 @@ class FacebookApiClient {
             property: String
         ): String {
 
-            val p =
+            val p1 =
                 Regex(
-                    "<meta[^>]+(?:property|name)=" +
-                    "[\\\"']${Regex.escape(property)}[\\\"']" +
-                    "[^>]+content=[\\\"']([^\\\"']*)[\\\"']" +
-                    "[^>]*>",
+                    "<meta[^>]+(?:property|name)=[\"']" +
+                        Regex.escape(property) +
+                        "[\"'][^>]+content=[\"']([^\"']*)" +
+                        "[\"'][^>]*>",
                     RegexOption.IGNORE_CASE
                 )
 
 
             val p2 =
                 Regex(
-                    "<meta[^>]+content=" +
-                    "[\\\"']([^\\\"']*)[\\\"']" +
-                    "[^>]+(?:property|name)=" +
-                    "[\\\"']${Regex.escape(property)}[\\\"']" +
-                    "[^>]*>",
+                    "<meta[^>]+content=[\"']([^\"']*)" +
+                        "[\"'][^>]+(?:property|name)=[\"']" +
+                        Regex.escape(property) +
+                        "[\"'][^>]*>",
                     RegexOption.IGNORE_CASE
                 )
 
 
-            return p
-                .find(html)
+            return p1.find(html)
                 ?.groupValues
                 ?.getOrNull(1)
                 .orEmpty()
                 .ifBlank {
 
-                    p2
-                        .find(html)
+                    p2.find(html)
                         ?.groupValues
                         ?.getOrNull(1)
                         .orEmpty()
@@ -895,6 +898,7 @@ class FacebookApiClient {
 
                 Regex(
                     "<title[^>]*>(.*?)</title>",
+
                     setOf(
                         RegexOption.IGNORE_CASE,
                         RegexOption.DOT_MATCHES_ALL
@@ -919,81 +923,93 @@ class FacebookApiClient {
 
         val time =
             firstNonBlank(
-                meta(
-                    "article:published_time"
-                ),
-
-                meta(
-                    "video:release_date"
-                ),
-
-                meta(
-                    "og:updated_time"
-                )
+                meta("article:published_time"),
+                meta("video:release_date"),
+                meta("og:updated_time")
             )
 
 
         return FacebookResult(
-            title = decodeHtml(title),
-            time = time,
-            image = decodeHtml(image),
-            resolvedUrl = resolvedUrl
+
+            title =
+                decodeHtml(title),
+
+            time =
+                decodeHtml(time),
+
+            image =
+                decodeHtml(image),
+
+            resolvedUrl =
+                resolvedUrl
         )
     }
 
 
-    /**
-     * Giải mã một số HTML entities cơ bản.
-     */
+    // ================================================================
+    // HTML DECODE
+    // ================================================================
+
     private fun decodeHtml(
         value: String
     ): String {
 
         return value
+
             .replace(
                 "&amp;",
                 "&"
             )
+
             .replace(
                 "&quot;",
                 "\""
             )
+
             .replace(
                 "&#39;",
                 "'"
             )
+
             .replace(
                 "&lt;",
                 "<"
             )
+
             .replace(
                 "&gt;",
                 ">"
             )
+
             .trim()
     }
 
 
-    /**
-     * Lấy giá trị String đầu tiên không rỗng.
-     */
+    // ================================================================
+    // FIRST NON BLANK
+    // ================================================================
+
     private fun firstNonBlank(
         vararg values: String
     ): String {
 
-        return values
-            .firstOrNull {
-                it.isNotBlank()
-            }
-            ?: ""
+        return values.firstOrNull {
+            it.isNotBlank()
+        } ?: ""
     }
 
 
     companion object {
 
         private const val MOBILE_UA =
-            "Mozilla/5.0 (Linux; Android 14; Mobile) " +
-            "AppleWebKit/537.36 " +
-            "Chrome/131.0 Mobile Safari/537.36"
+            "Mozilla/5.0 (Linux; Android 14; " +
+            "SM-A528B) AppleWebKit/537.36 " +
+            "(KHTML, like Gecko) " +
+            "Chrome/131.0.0.0 Mobile Safari/537.36"
     }
 }
+
+
+private class FacebookResultException(
+    message: String
+) : Exception(message)
