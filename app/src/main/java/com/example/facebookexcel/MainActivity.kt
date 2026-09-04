@@ -46,6 +46,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FacebookExcelScreen(vm: MainViewModel = viewModel()) {
     val items by vm.items.collectAsState()
