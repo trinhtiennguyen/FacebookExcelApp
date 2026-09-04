@@ -17,13 +17,35 @@ android {
         versionName = "1.0"
     }
 
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = "17"
+    }
+
+    // Force Java compilation to the same JVM target used by Kotlin/KSP.
+    tasks.withType<JavaCompile>().configureEach {
+        sourceCompatibility = "17"
+        targetCompatibility = "17"
+    }
+
     buildFeatures {
         compose = true
     }
 
     packaging {
-        resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
+        resources {
+            excludes += "/META-INF/{AL2.0,LGPL2.1}"
+        }
     }
+}
+
+// Keep Kotlin, KSP and Java on exactly the same JDK/JVM target.
+kotlin {
+    jvmToolchain(17)
 }
 
 dependencies {

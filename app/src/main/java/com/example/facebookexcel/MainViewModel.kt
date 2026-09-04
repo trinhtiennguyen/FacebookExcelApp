@@ -58,32 +58,40 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun loadFacebook(item: FacebookItem, token: String) {
-        if (item.link.isBlank()) {
+        val link = item.link.trim()
+        if (link.isBlank()) {
             _message.value = "Hãy nhập link Facebook trước."
             return
         }
 
         viewModelScope.launch {
+            val existingCount = withContext(Dispatchers.IO) {
+                dao.countExistingLink(link, item.id)
+            }
+            if (existingCount > 0) {
+                _message.value = "Link đã tồn tại trong CSDL"
+                return@launch
+            }
+
             _loadingIds.update { it + item.id }
-
-            val result = withContext(Dispatchers.IO) {
-                api.load(item.link.trim(), token.trim())
-            }
-
-            result.onSuccess { data ->
-                dao.update(
-                    item.copy(
-                        title = data.title.ifBlank { item.title },
-                        time = data.time.ifBlank { item.time },
-                        image = data.image.ifBlank { item.image }
+            try {
+                val result = api.load(getApplication(), link, token.trim())
+                result.onSuccess { data ->
+                    dao.update(
+                        item.copy(
+                            link = link,
+                            title = data.title.ifBlank { item.title },
+                            time = data.time.ifBlank { item.time },
+                            image = data.image.ifBlank { item.image }
+                        )
                     )
-                )
-                _message.value = "Đã LOAD: ${item.link}"
-            }.onFailure {
-                _message.value = it.message ?: "Không thể LOAD dữ liệu Facebook."
+                    _message.value = "Đã LOAD: $link"
+                }.onFailure {
+                    _message.value = it.message ?: "Không thể LOAD dữ liệu Facebook."
+                }
+            } finally {
+                _loadingIds.update { it - item.id }
             }
-
-            _loadingIds.update { it - item.id }
         }
     }
 

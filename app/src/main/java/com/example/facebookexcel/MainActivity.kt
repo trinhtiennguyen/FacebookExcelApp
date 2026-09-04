@@ -1,6 +1,9 @@
 package com.example.facebookexcel
 
 import android.os.Bundle
+import android.webkit.CookieManager
+import android.webkit.WebView
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Image
@@ -46,6 +49,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FacebookExcelScreen(vm: MainViewModel = viewModel()) {
     val items by vm.items.collectAsState()
@@ -53,6 +57,7 @@ fun FacebookExcelScreen(vm: MainViewModel = viewModel()) {
     val message by vm.message.collectAsState()
     var token by remember { mutableStateOf("") }
     var showSettings by remember { mutableStateOf(false) }
+    var showFacebookLogin by remember { mutableStateOf(false) }
 
     val horizontal = rememberScrollState()
 
@@ -125,9 +130,7 @@ fun FacebookExcelScreen(vm: MainViewModel = viewModel()) {
                         item {
                             NewRow(
                                 onAdd = { link ->
-                                    vm.addEmptyRow()
-                                    // The last empty row is intentionally available.
-                                    // User can paste a URL into any row.
+                                    vm.addLinkRow(link)
                                 }
                             )
                         }
@@ -159,6 +162,40 @@ fun FacebookExcelScreen(vm: MainViewModel = viewModel()) {
                 confirmButton = {
                     Button(onClick = { showSettings = false }) {
                         Text("OK")
+                    }
+                }
+            )
+        }
+
+        if (showFacebookLogin) {
+            AlertDialog(
+                onDismissRequest = { showFacebookLogin = false },
+                title = { Text("Đăng nhập Facebook") },
+                text = {
+                    Column(Modifier.fillMaxWidth()) {
+                        Text(
+                            "Đăng nhập tài khoản Facebook của mày trong cửa sổ này. Sau đó đóng cửa sổ và bấm LOAD Reel. App không lưu mật khẩu."
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        AndroidView(
+                            factory = { context ->
+                                CookieManager.getInstance().setAcceptCookie(true)
+                                WebView(context).apply {
+                                    settings.javaScriptEnabled = true
+                                    settings.domStorageEnabled = true
+                                    settings.userAgentString = "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 Chrome/131.0 Mobile Safari/537.36"
+                                    loadUrl("https://m.facebook.com/")
+                                }
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(420.dp)
+                        )
+                    }
+                },
+                confirmButton = {
+                    Button(onClick = { showFacebookLogin = false }) {
+                        Text("Đóng")
                     }
                 }
             )
