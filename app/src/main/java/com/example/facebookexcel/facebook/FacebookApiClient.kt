@@ -250,23 +250,65 @@ class FacebookApiClient {
             b.contains("create new account")
     }
 
-    private fun parseHtml(html: String, resolvedUrl: String): FacebookResult {
-        fun meta(property: String): String {
-            val p = Regex("<meta[^>]+(?:property|name)=[\\\"']${Regex.escape(property)}[\\\"'][^>]+content=[\\\"']([^\\\"']*)[\\\"'][^>]*>", RegexOption.IGNORE_CASE)
-            val p2 = Regex("<meta[^>]+content=[\\\"']([^\\\"']*)[\\\"'][^>]+(?:property|name)=[\\\"']${Regex.escape(property)}[\\\"'][^>]*>", RegexOption.IGNORE_CASE)
-            return p.find(html)?.groupValues?.getOrNull(1).orEmpty().ifBlank { p2.find(html)?.groupValues?.getOrNull(1).orEmpty() }
-        }
+	private fun parseHtml(html: String, resolvedUrl: String): FacebookResult {
+		fun meta(property: String): String {
+			val p = Regex(
+				"<meta[^>]+(?:property|name)=[\\\"']${Regex.escape(property)}[\\\"'][^>]+content=[\\\"']([^\\\"']*)[\\\"'][^>]*>",
+				RegexOption.IGNORE_CASE
+			)
 
-        val title = firstNonBlank(
-            meta("og:title"),
-            meta("twitter:title"),
-            Regex("<title[^>]*>(.*?)</title>", RegexOption.IGNORE_CASE or RegexOption.DOT_MATCHES_ALL)
-                .find(html)?.groupValues?.getOrNull(1)?.let(::decodeHtml).orEmpty()
-        )
-        val image = firstNonBlank(meta("og:image"), meta("twitter:image"))
-        val time = firstNonBlank(meta("article:published_time"), meta("video:release_date"), meta("og:updated_time"))
-        return FacebookResult(decodeHtml(title), time, decodeHtml(image), resolvedUrl)
-    }
+			val p2 = Regex(
+				"<meta[^>]+content=[\\\"']([^\\\"']*)[\\\"'][^>]+(?:property|name)=[\\\"']${Regex.escape(property)}[\\\"'][^>]*>",
+				RegexOption.IGNORE_CASE
+			)
+
+			return p.find(html)
+				?.groupValues
+				?.getOrNull(1)
+				.orEmpty()
+				.ifBlank {
+					p2.find(html)
+						?.groupValues
+						?.getOrNull(1)
+						.orEmpty()
+				}
+		}
+
+		val title = firstNonBlank(
+			meta("og:title"),
+			meta("twitter:title"),
+			Regex(
+				"<title[^>]*>(.*?)</title>",
+				setOf(
+					RegexOption.IGNORE_CASE,
+					RegexOption.DOT_MATCHES_ALL
+				)
+			)
+				.find(html)
+				?.groupValues
+				?.getOrNull(1)
+				?.let { decodeHtml(it) }
+				.orEmpty()
+		)
+
+		val image = firstNonBlank(
+			meta("og:image"),
+			meta("twitter:image")
+		)
+
+		val time = firstNonBlank(
+			meta("article:published_time"),
+			meta("video:release_date"),
+			meta("og:updated_time")
+		)
+
+		return FacebookResult(
+			decodeHtml(title),
+			time,
+			decodeHtml(image),
+			resolvedUrl
+		)
+	}
 
     private fun decodeHtml(value: String): String =
         value.replace("&amp;", "&")
